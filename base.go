@@ -8,6 +8,10 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"sync"
+	"os"
+	"path/filepath"
+	"strconv"
+	"io/ioutil"
 )
 
 const (
@@ -25,6 +29,56 @@ func NewScraper() *GoScrape {
 type GoScrape struct {
 	wg sync.WaitGroup
 	ch []chan *Task
+	tid int
+	mu sync.Mutex
+	logdir string
+}
+
+func (g *GoScrape) Incr() int {
+	g.mu.Lock()
+	taskId := g.tid+1
+	g.tid = taskId
+	g.mu.Unlock()
+	return taskId
+}
+
+func (g *GoScrape) StoreInfo(req *http.Request, resp *http.Response) (err error) {
+	if g.logdir != "" {
+
+		hfname := fmt.Sprint(strconv.Itoa(g.tid), ".headers")
+		hpath := filepath.Join(g.logdir, hfname)
+		hf, err := os.Create(hpath)
+		if err != nil {
+			Error.Println("Can't create file:", hfname)
+			return err
+		}
+		defer hf.Close()
+		err = req.Header.Write(hf)
+		if err != nil {
+			Error.Println("Can't write headers to:", hfname)
+			return err
+		}
+		rfname := fmt.Sprint(strconv.Itoa(g.tid), ".response")
+		rpath := filepath.Join(g.logdir, rfname)
+		rf, err := os.Create(rpath)
+		if err != nil {
+			Error.Println("Can't create file:", rfname)
+			return err
+		}
+		defer rf.Close()
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+		err = resp.Write(rf)
+
+
+		if err != nil {
+			Error.Println("Can't write headers to:", rfname)
+		}
+		resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+		//f.WriteString(req.Hea)
+
+	}
+	return
 }
 
 func (g *GoScrape) AddTask(h Handler, url string, o *HttpOptions, priority int, args ...interface{}) {
@@ -33,6 +87,10 @@ func (g *GoScrape) AddTask(h Handler, url string, o *HttpOptions, priority int, 
 		task := Task{h, url, o, args}
 		g.ch[priority] <- &task
 	}()
+}
+
+func (g *GoScrape) SetLogDir(path string) {
+	g.logdir = path
 }
 
 func GetCookies(uri string, options *HttpOptions) *cookiejar.Jar {
@@ -63,6 +121,9 @@ func (g *GoScrape) PrepareReq(uri string, o *HttpOptions) (*http.Request, error)
 func (g *GoScrape) Scrape(t *Task) {
 	defer g.wg.Done()
 
+	taskId := g.Incr()
+	Info.Println("Received task #", taskId, t.Url)
+
 	jar := GetCookies(t.Url, t.Options)
 	client := &http.Client{Jar: jar}
 
@@ -70,12 +131,16 @@ func (g *GoScrape) Scrape(t *Task) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error while downloading", t.Url, "-", err)
+		Error.Println("Error while downloading", t.Url, "-", err)
 		return
 	}
 	defer resp.Body.Close()
+	if err := g.StoreInfo(req, resp); err != nil {
+		Error.Println("Failed task #", taskId, "-", err)
+	}
 
 	if resp.StatusCode == 200 {
+
 		//fmt.Println(resp.Cookies())
 		cookies := resp.Cookies()
 		if len(cookies) > 0 {
@@ -89,6 +154,7 @@ func (g *GoScrape) Scrape(t *Task) {
 			return
 		}
 		t.Handler.Success(g, t.Options, doc, t.Args...)
+		Info.Println("Finished task #", taskId, t.Url)
 	} else {
 		fmt.Println(resp.StatusCode)
 	}
