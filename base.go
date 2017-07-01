@@ -84,9 +84,19 @@ func (g *GoScrape) StoreInfo(req *http.Request, resp *http.Response) (err error)
 
 func (g *GoScrape) AddTask(h Handler, url string, o *HttpOptions, priority int, args ...interface{}) {
 	g.wg.Add(1)
+	taskId := g.Incr()
 	go func() {
-		task := Task{h, url, o, args}
+		task := Task{Handler: h, Url: url, Options: o, Priority: priority, Id: taskId,  Args: args}
 		g.ch[priority] <- &task
+	}()
+}
+
+
+func (g *GoScrape) RequeueTask(t *Task) {
+	g.wg.Add(1)
+	Info.Println("Requeued #", t.Id, t.Url)
+	go func() {
+		g.ch[t.Priority] <- t
 	}()
 }
 
@@ -140,19 +150,22 @@ func (g *GoScrape) SetupClient(uri string, o *HttpOptions) (*http.Client, *http.
 func (g *GoScrape) Scrape(t *Task) {
 	defer g.wg.Done()
 
-	taskId := g.Incr()
-	Info.Println("Received task #", taskId, t.Url)
+	Info.Println("Received task #", t.Id, t.Url)
 
 	client, req, err := g.SetupClient(t.Url, t.Options)
 
 	resp, err := client.Do(req)
 	if err != nil {
 		Error.Println("Error while downloading", t.Url, "-", err)
+		if t.Retry < 5 {
+			t.Retry++
+			g.RequeueTask(t)
+		}
 		return
 	}
 	defer resp.Body.Close()
 	if err := g.StoreInfo(req, resp); err != nil {
-		Error.Println("Failed task #", taskId, "-", err)
+		Error.Println("Failed task #", t.Id, "-", err)
 	}
 
 	if resp.StatusCode == 200 {
@@ -170,7 +183,7 @@ func (g *GoScrape) Scrape(t *Task) {
 			return
 		}
 		t.Handler.Success(g, t.Options, doc, t.Args...)
-		Info.Println("Finished task #", taskId, t.Url)
+		Info.Println("Finished task #", t.Id, t.Url)
 	} else {
 		t.Handler.Fail(g)
 	}
