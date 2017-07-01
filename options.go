@@ -1,10 +1,10 @@
 package goscrape
 
 import (
-	"net/http"
-	"strings"
-	"net/url"
 	"log"
+	"net/http"
+	"net/url"
+	"strings"
 )
 
 type HttpOptions struct {

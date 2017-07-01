@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
+	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"sync"
 	"os"
 	"path/filepath"
 	"strconv"
-	"io/ioutil"
+	"sync"
 	"time"
 )
 
@@ -28,16 +28,16 @@ func NewScraper() *GoScrape {
 }
 
 type GoScrape struct {
-	wg sync.WaitGroup
-	ch []chan *Task
-	tid int
-	mu sync.Mutex
+	wg     sync.WaitGroup
+	ch     []chan *Task
+	tid    int
+	mu     sync.Mutex
 	logdir string
 }
 
 func (g *GoScrape) Incr() int {
 	g.mu.Lock()
-	taskId := g.tid+1
+	taskId := g.tid + 1
 	g.tid = taskId
 	g.mu.Unlock()
 	return taskId
@@ -71,7 +71,6 @@ func (g *GoScrape) StoreInfo(req *http.Request, resp *http.Response) (err error)
 		resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
 		err = resp.Write(rf)
 
-
 		if err != nil {
 			Error.Println("Can't write headers to:", rfname)
 		}
@@ -86,11 +85,10 @@ func (g *GoScrape) AddTask(h Handler, url string, o *HttpOptions, priority int, 
 	g.wg.Add(1)
 	taskId := g.Incr()
 	go func() {
-		task := Task{Handler: h, Url: url, Options: o, Priority: priority, Id: taskId,  Args: args}
+		task := Task{Handler: h, Url: url, Options: o, Priority: priority, Id: taskId, Args: args}
 		g.ch[priority] <- &task
 	}()
 }
-
 
 func (g *GoScrape) RequeueTask(t *Task) {
 	g.wg.Add(1)
@@ -118,7 +116,6 @@ func GetCookies(uri string, options *HttpOptions) *cookiejar.Jar {
 	return jar
 }
 
-
 func (g *GoScrape) SetupClient(uri string, o *HttpOptions) (*http.Client, *http.Request, error) {
 	var buf bytes.Buffer
 	req, err := http.NewRequest(o.Method(), uri, &buf)
@@ -131,7 +128,6 @@ func (g *GoScrape) SetupClient(uri string, o *HttpOptions) (*http.Client, *http.
 	}
 
 	jar := GetCookies(uri, o)
-
 
 	tr := &http.Transport{
 		Proxy: func(r *http.Request) (*url.URL, error) {

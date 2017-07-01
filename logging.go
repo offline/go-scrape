@@ -1,16 +1,16 @@
 package goscrape
 
 import (
-	"log"
 	"io/ioutil"
+	"log"
 	"os"
 )
 
 var (
-    Trace   *log.Logger
-    Info    *log.Logger
-    Warning *log.Logger
-    Error   *log.Logger
+	Trace   *log.Logger
+	Info    *log.Logger
+	Warning *log.Logger
+	Error   *log.Logger
 )
 
 func init() {
