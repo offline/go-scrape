@@ -108,27 +108,19 @@ func GetCookies(uri string, options *HttpOptions) *cookiejar.Jar {
 	return jar
 }
 
-func (g *GoScrape) PrepareReq(uri string, o *HttpOptions) (*http.Request, error) {
 
+func (g *GoScrape) SetupClient(uri string, o *HttpOptions) (*http.Client, *http.Request, error) {
 	var buf bytes.Buffer
 	req, err := http.NewRequest(o.Method(), uri, &buf)
 	if err != nil {
 		fmt.Println("Error creating request", uri, "-", err)
-		return nil, err
+		return nil, nil, err
 	}
 	for key, value := range o.Headers() {
 		req.Header.Add(key, value)
 	}
-	return req, nil
-}
 
-func (g *GoScrape) Scrape(t *Task) {
-	defer g.wg.Done()
-
-	taskId := g.Incr()
-	Info.Println("Received task #", taskId, t.Url)
-
-	jar := GetCookies(t.Url, t.Options)
+	jar := GetCookies(uri, o)
 
 
 	tr := &http.Transport{
@@ -141,10 +133,17 @@ func (g *GoScrape) Scrape(t *Task) {
 		DisableCompression: true,
 	}
 
-
 	client := &http.Client{Transport: tr, Jar: jar}
+	return client, req, nil
+}
 
-	req, err := g.PrepareReq(t.Url, t.Options)
+func (g *GoScrape) Scrape(t *Task) {
+	defer g.wg.Done()
+
+	taskId := g.Incr()
+	Info.Println("Received task #", taskId, t.Url)
+
+	client, req, err := g.SetupClient(t.Url, t.Options)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -173,7 +172,7 @@ func (g *GoScrape) Scrape(t *Task) {
 		t.Handler.Success(g, t.Options, doc, t.Args...)
 		Info.Println("Finished task #", taskId, t.Url)
 	} else {
-		fmt.Println(resp.StatusCode)
+		t.Handler.Fail(g)
 	}
 }
 
