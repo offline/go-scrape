@@ -99,7 +99,10 @@ func GetCookies(uri string, options *HttpOptions) *cookiejar.Jar {
 		fmt.Errorf("URL has wrong format", uri)
 		return jar
 	} else {
-		jar.SetCookies(u, options.Cookies())
+		cookies := options.Cookies()
+		if len(cookies) > 0 {
+			jar.SetCookies(u, cookies)
+		}
 	}
 	return jar
 }
