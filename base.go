@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"io/ioutil"
+	"time"
 )
 
 const (
@@ -128,7 +129,20 @@ func (g *GoScrape) Scrape(t *Task) {
 	Info.Println("Received task #", taskId, t.Url)
 
 	jar := GetCookies(t.Url, t.Options)
-	client := &http.Client{Jar: jar}
+
+
+	tr := &http.Transport{
+		Proxy: func(r *http.Request) (*url.URL, error) {
+			proxyUrl, err := url.Parse("socks5://181.215.215.199:8085")
+			return proxyUrl, err
+		},
+		MaxIdleConns:       10,
+		IdleConnTimeout:    30 * time.Second,
+		DisableCompression: true,
+	}
+
+
+	client := &http.Client{Transport: tr, Jar: jar}
 
 	req, err := g.PrepareReq(t.Url, t.Options)
 

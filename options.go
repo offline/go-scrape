@@ -14,7 +14,6 @@ type HttpOptions struct {
 }
 
 func NewHttpOptions() *HttpOptions {
-	//cookies := make([]*http.Cookie, 0)
 	var cookies = []*http.Cookie{}
 	headers := make(map[string]string)
 	return &HttpOptions{
