@@ -13,6 +13,11 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"log"
+	"bufio"
+	"strings"
+	"math/rand"
+	"errors"
 )
 
 const (
@@ -24,7 +29,7 @@ const (
 // Scraper initializer
 func NewScraper() *GoScrape {
 	ch := []chan *Task{make(chan *Task), make(chan *Task), make(chan *Task)}
-	return &GoScrape{ch: ch}
+	return &GoScrape{ch: ch, proxylist: []Proxy{}}
 }
 
 type GoScrape struct {
@@ -33,6 +38,26 @@ type GoScrape struct {
 	tid    int
 	mu     sync.Mutex
 	logdir string
+	proxylist []Proxy
+}
+
+func (g *GoScrape) SetProxyFile(path string, proxytype string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Fatal("Proxyfile invalid")
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+
+	for scanner.Scan() {
+		parts := strings.Split(scanner.Text(), ":")
+		host := parts[0]
+		port, _ := strconv.Atoi(parts[1])
+		proxy := Proxy{Scheme: proxytype, Host: host, Port: port}
+		g.proxylist = append(g.proxylist, proxy)
+	}
+
+	return err
 }
 
 func (g *GoScrape) Incr() int {
@@ -116,6 +141,15 @@ func GetCookies(uri string, options *HttpOptions) *cookiejar.Jar {
 	return jar
 }
 
+func (g *GoScrape) GetRandomProxy() (Proxy, error) {
+	if len(g.proxylist) == 0 {
+		return Proxy{}, errors.New("no proxy")
+	}
+	rand.Seed(time.Now().UnixNano())
+	n := rand.Int() % len(g.proxylist)
+	return g.proxylist[n], nil
+}
+
 func (g *GoScrape) SetupClient(uri string, o *HttpOptions) (*http.Client, *http.Request, error) {
 	var buf bytes.Buffer
 	req, err := http.NewRequest(o.Method(), uri, &buf)
@@ -129,18 +163,25 @@ func (g *GoScrape) SetupClient(uri string, o *HttpOptions) (*http.Client, *http.
 
 	jar := GetCookies(uri, o)
 
+	proxy, err := g.GetRandomProxy()
+	if err != nil {
+		client := &http.Client{Jar: jar}
+		return client, req, nil
+	}
 	tr := &http.Transport{
 		Proxy: func(r *http.Request) (*url.URL, error) {
-			proxyUrl, err := url.Parse("socks5://181.215.215.199:8085")
+			rawUrl := fmt.Sprintf("%s://%s:%d", proxy.Scheme, proxy.Host, proxy.Port)
+			proxyUrl, err := url.Parse(rawUrl)
+
 			return proxyUrl, err
 		},
 		MaxIdleConns:       10,
 		IdleConnTimeout:    30 * time.Second,
 		DisableCompression: true,
 	}
-
 	client := &http.Client{Transport: tr, Jar: jar}
 	return client, req, nil
+
 }
 
 func (g *GoScrape) Scrape(t *Task) {
