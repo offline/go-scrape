@@ -229,12 +229,24 @@ func (g *GoScrape) Scrape(t *Task) {
 func (g *GoScrape) Worker() {
 	for {
 		select {
-		case task := <-g.ch[High]:
-			g.Scrape(task)
-		case task := <-g.ch[Medium]:
-			g.Scrape(task)
-		case task := <-g.ch[Low]:
-			g.Scrape(task)
+			case task := <-g.ch[High]:
+				g.Scrape(task)
+			default:
+				select {
+					case task := <-g.ch[Medium]:
+						g.Scrape(task)
+					default:
+						select {
+							case task := <-g.ch[High]:
+								g.Scrape(task)
+
+							case task := <-g.ch[Medium]:
+								g.Scrape(task)
+
+							case task := <-g.ch[Low]:
+								g.Scrape(task)
+						}
+				}
 		}
 	}
 }
