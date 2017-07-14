@@ -222,7 +222,7 @@ func (g *GoScrape) Scrape(t *Task) {
 		t.Handler.Success(g, t.Options, doc, t.Args...)
 		Info.Println("Finished task #", t.Id, t.Url)
 	} else {
-		t.Handler.Fail(g)
+		t.Handler.Fail(g, t.Url)
 	}
 }
 
