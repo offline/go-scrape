@@ -28,7 +28,7 @@ const (
 
 // Scraper initializer
 func NewScraper() *GoScrape {
-	ch := []chan *Task{make(chan *Task), make(chan *Task), make(chan *Task)}
+	ch := []chan *Task{make(chan *Task, 1000), make(chan *Task, 1000), make(chan *Task, 1000)}
 	return &GoScrape{ch: ch, proxylist: []Proxy{}}
 }
 
@@ -237,6 +237,14 @@ func (g *GoScrape) Worker() {
 			g.Scrape(task)
 		}
 	}
+}
+
+func (g *GoScrape) Stats() map[string]int {
+	data := map[string]int{}
+	data["High Priority Len"] = len(g.ch[High])
+	data["Medium Priority Len"] = len(g.ch[Medium])
+	data["Low Priority Len"] = len(g.ch[Low])
+	return data
 }
 
 func (g *GoScrape) Start(workers int) {
