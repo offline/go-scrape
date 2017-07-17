@@ -314,7 +314,7 @@ func (g *GoScrape) Scrape(t *Task) {
 			fmt.Println("Error parsing body of", t.Url, "-", err)
 			return
 		}
-		t.Handler.Success(g, t.Options, doc, t.Args...)
+		t.Handler.Success(g, t.Options, doc, req, t.Args...)
 		Info.Println("Finished task #", t.Id, t.Url)
 	} else {
 		t.Handler.Fail(g, t.Url)
