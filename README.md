@@ -51,9 +51,9 @@ func (h *BlogIndexHandler) Fail(g *goscrape.GoScrape, url string) {
 
 func main() {
 	scraper := goscrape.NewScraper()
-	appURL := "https://blog.golang.org/index"
+	url := "https://blog.golang.org/index"
 	httpOptions := goscrape.NewHttpOptions()
-	scraper.AddTask(new(BlogIndexHandler), appURL, httpOptions, 10)
+	scraper.AddTask(new(BlogIndexHandler), url, httpOptions, 10)
 	scraper.Start(3)
 }
 ```
