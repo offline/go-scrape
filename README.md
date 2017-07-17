@@ -12,9 +12,9 @@ import (
 	"net/http"
 )
 
-type PkgHandler struct{}
+type BlogPostHandler struct{}
 
-func (p *PkgHandler) Success(
+func (p *BlogPostHandler) Success(
 	g *goscrape.GoScrape,
 	o *goscrape.HttpOptions,
 	doc *goquery.Document,
@@ -26,7 +26,7 @@ func (p *PkgHandler) Success(
 	})
 }
 
-func (p *PkgHandler) Fail(g *goscrape.GoScrape, url string) {
+func (p *BlogPostHandler) Fail(g *goscrape.GoScrape, url string) {
 	fmt.Println("Failed")
 }
 
@@ -36,12 +36,12 @@ func (h *BlogIndexHandler) Success(
 	g *goscrape.GoScrape,
 	o *goscrape.HttpOptions,
 	doc *goquery.Document,
-    req *http.Request,
+	req *http.Request,
 	args ...interface{},
 ) {
 	doc.Find(".blogtitle a").Each(func(i int, s *goquery.Selection) {
 		link := fmt.Sprint(req.URL.Scheme, "://", req.URL.Host, s.AttrOr("href", ""))
-		g.AddTask(new(PkgHandler), link, o, 100)
+		g.AddTask(new(BlogPostHandler), link, o, 100)
 	})
 }
 
