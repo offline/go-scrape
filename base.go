@@ -1,44 +1,51 @@
 package goscrape
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/jmcvetta/randutil"
 	"io/ioutil"
+	"log"
+	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
-	"log"
-	"bufio"
-	"strings"
-	"math/rand"
-	"errors"
-)
-
-const (
-	Low    int = 0
-	Medium int = 1
-	High   int = 2
 )
 
 // Scraper initializer
 func NewScraper() *GoScrape {
-	ch := []chan *Task{make(chan *Task, 1000), make(chan *Task, 1000), make(chan *Task, 1000)}
-	return &GoScrape{ch: ch, proxylist: []Proxy{}}
+	smap := make(map[int][]*Task)
+	taskChan := make(chan *Task, 1000)
+	done := make(chan bool)
+	return &GoScrape{
+		smap:      smap,
+		proxylist: []Proxy{},
+		taskChan:  taskChan,
+		done:      done,
+	}
 }
 
 type GoScrape struct {
-	wg     sync.WaitGroup
-	ch     []chan *Task
-	tid    int
-	mu     sync.Mutex
-	logdir string
-	proxylist []Proxy
+	wg         sync.WaitGroup
+	taskChan   chan *Task
+	done       chan bool
+	tid        int
+	mu         sync.Mutex
+	smap       map[int][]*Task
+	logdir     string
+	proxylist  []Proxy
+	packetSize int
+	weights    []randutil.Choice
+	min        int
 }
 
 func (g *GoScrape) SetProxyFile(path string, proxytype string) error {
@@ -60,12 +67,87 @@ func (g *GoScrape) SetProxyFile(path string, proxytype string) error {
 	return err
 }
 
+func (g *GoScrape) SetPacketSize(size int) {
+	g.packetSize = size
+}
+
+func (g *GoScrape) SetLogDir(path string) {
+	g.logdir = path
+}
+
 func (g *GoScrape) Incr() int {
 	g.mu.Lock()
 	taskId := g.tid + 1
 	g.tid = taskId
 	g.mu.Unlock()
 	return taskId
+}
+
+func (g *GoScrape) GenWeightedRandom(nmap map[int]int) {
+	g.weights = []randutil.Choice{}
+	for i, _ := range nmap {
+		g.weights = append(g.weights, randutil.Choice{i, i})
+	}
+}
+
+func (g *GoScrape) Calculate() map[int]int {
+	var total int
+	var maxSize int
+	// put non-empty sources and its length in nmap
+	// sum all available tasks
+	nmap := make(map[int]int)
+	for i, v := range g.smap {
+		if len(v) > 0 {
+			nmap[i] = len(v)
+			total += len(v)
+		}
+	}
+
+	// choose a min from existing elements or packet size
+	if g.packetSize > total {
+		maxSize = total
+	} else {
+		maxSize = g.packetSize
+	}
+
+	// fill with a new weighted choice slice
+	g.GenWeightedRandom(nmap)
+
+	picks := make(map[int]int)
+	for i := 0; i < maxSize; i++ {
+		choice, _ := randutil.WeightedChoice(g.weights)
+		weight := choice.Item.(int)
+
+		picks[weight]++
+		nmap[weight]--
+		if nmap[weight] == 0 {
+			delete(nmap, weight)
+			g.GenWeightedRandom(nmap)
+		}
+
+	}
+	return picks
+}
+
+func (g *GoScrape) onDone() {
+	var left int = 1
+	for range g.done {
+		left--
+		if left < g.min {
+			g.mu.Lock()
+			tasks := []*Task{}
+			picks := g.Calculate()
+			for weight, counter := range picks {
+				tasks = append(tasks, g.smap[weight][:counter]...)
+				g.smap[weight] = g.smap[weight][counter:]
+			}
+			g.mu.Unlock()
+			left += len(tasks)
+			for _, task := range tasks {
+				g.taskChan <- task
+			}
+		}
+	}
 }
 
 func (g *GoScrape) StoreInfo(req *http.Request, resp *http.Response) (err error) {
@@ -106,25 +188,38 @@ func (g *GoScrape) StoreInfo(req *http.Request, resp *http.Response) (err error)
 	return
 }
 
-func (g *GoScrape) AddTask(h Handler, url string, o *HttpOptions, priority int, args ...interface{}) {
+func (g *GoScrape) AddTask(h Handler, url string, o *HttpOptions, weight int, args ...interface{}) {
 	g.wg.Add(1)
 	taskId := g.Incr()
-	go func() {
-		task := Task{Handler: h, Url: url, Options: o, Priority: priority, Id: taskId, Args: args}
-		g.ch[priority] <- &task
-	}()
+
+	task := Task{
+		Handler: h,
+		Url:     url,
+		Options: o,
+		Weight:  weight,
+		Id:      taskId,
+		Args:    args,
+	}
+	g.mu.Lock()
+
+	if _, ok := g.smap[weight]; ok {
+		g.smap[weight] = append(g.smap[weight], &task)
+	} else {
+		g.smap[weight] = []*Task{}
+		g.smap[weight] = append(g.smap[weight], &task)
+
+	}
+	g.mu.Unlock()
+
 }
 
 func (g *GoScrape) RequeueTask(t *Task) {
 	g.wg.Add(1)
 	Info.Println("Requeued #", t.Id, t.Url)
-	go func() {
-		g.ch[t.Priority] <- t
-	}()
-}
+	g.mu.Lock()
+	g.smap[t.Weight] = append(g.smap[t.Weight], t)
+	g.mu.Unlock()
 
-func (g *GoScrape) SetLogDir(path string) {
-	g.logdir = path
 }
 
 func GetCookies(uri string, options *HttpOptions) *cookiejar.Jar {
@@ -227,46 +322,37 @@ func (g *GoScrape) Scrape(t *Task) {
 }
 
 func (g *GoScrape) Worker() {
-	for {
-		select {
-			case task := <-g.ch[High]:
-				g.Scrape(task)
-			default:
-				select {
-					case task := <-g.ch[Medium]:
-						g.Scrape(task)
-					default:
-						select {
-							case task := <-g.ch[High]:
-								g.Scrape(task)
-
-							case task := <-g.ch[Medium]:
-								g.Scrape(task)
-
-							case task := <-g.ch[Low]:
-								g.Scrape(task)
-						}
-				}
-		}
+	for task := range g.taskChan {
+		g.Scrape(task)
+		g.done <- true
 	}
 }
 
 func (g *GoScrape) Stats() map[string]int {
 	data := map[string]int{}
-	data["High Priority Len"] = len(g.ch[High])
-	data["Medium Priority Len"] = len(g.ch[Medium])
-	data["Low Priority Len"] = len(g.ch[Low])
+	g.mu.Lock()
+	for p, i := range g.smap {
+		key := fmt.Sprint(p, " priority length")
+		data[key] = len(i)
+	}
+	g.mu.Unlock()
 	return data
 }
 
 func (g *GoScrape) Start(workers int) {
 	fmt.Println("Started")
+	if g.packetSize == 0 {
+		g.packetSize = workers * 10
+	}
+	g.taskChan = make(chan *Task, g.packetSize+workers)
+
+	g.min = workers
+	go g.onDone()
 	for i := 0; i < workers; i++ {
 		go g.Worker()
 	}
+	g.done <- true
+
 	g.wg.Wait()
-	close(g.ch[High])
-	close(g.ch[Medium])
-	close(g.ch[Low])
 	fmt.Println("Finished")
 }
